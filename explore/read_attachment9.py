@@ -6,16 +6,18 @@
 
 import pandas as pd
 import os, sys
+import re
+import datetime
 
 pd.set_option('display.max_columns',20) #给最大列设置为10列
 
 pd.set_option('display.max_rows',10)#设置最大可见10行
 
-cosmic_cols = ['batch', 'project', 'requirementNO', 'requirement_name', 'requirement_detail', 'advocator',
+cosmic_cols = ['batch', 'project', 'project_No', 'requirementNO', 'requirement_name', 'requirement_detail', 'advocator',
                                       'days_spent', 'coding_requirement']
 
-noncosmic_cols = ['batch', 'project', 'requirementNO', 'requirement_name', 'requirement_detail', 'work_cat',
-                                          'work_name', 'work_detail', 'days_spent']
+noncosmic_cols = ['batch', 'project', 'project_No', 'requirementNO', 'requirement_name', 'work_cat', 'work_name',
+                                    'work_detail', 'days_spent']
 
 cosmic_info = pd.DataFrame(columns=cosmic_cols)
 
@@ -23,14 +25,23 @@ cosmic_info = pd.DataFrame(columns=cosmic_cols)
 noncosmic_info = pd.DataFrame(columns=noncosmic_cols)
 
 
+def format1(item):
+    re_no = re.split('2020|年|需求|序号|号', item)
+    while '' in re_no:
+        re_no.remove('')
+    print(re_no)
+    return int(re_no[0])
+
+
 def get_cosmic_info(cosmic_sheet):
     temp_info = pd.DataFrame(columns=cosmic_cols)
-
     part1 = cosmic_sheet[cosmic_sheet.iloc[:, 0].str.strip() == '需求序号'].reset_index(drop=True)
     part1.dropna(inplace=True, axis=1)  ###去重空字段
     requirement_count = part1.shape[0]
+    # 需求序号/需求序号_value/需求名称/需求名称_value的格式，并且需求序号_value不能有空值
     if part1.shape[1] == 4 and not (part1.iloc(axis=1)[1].str.strip() == '').any():
         temp_info['requirementNO'] = part1.iloc[:, 1]
+        temp_info['requirementNO'].map(format1)
     else:
         return False, 'Error: 请检查需求序号、需求名称格式'
 
@@ -86,20 +97,17 @@ def get_cosmic_info(cosmic_sheet):
         temp_info['coding_requirement'] = coding_requirement.iloc[:, 1]
     else:
         return False, 'Error: 请检查代码开发是否满足“投入人员-功能点数量-功能名称列表”的描述格式'
-
-    project_info = cosmic_sheet[cosmic_sheet.iloc[:, 0].str.strip() == '所属系统/项目']
-    project_info.dropna(inplace=True, axis=1)
-    if project_info.iloc[0, 1].strip() != '':
-        temp_info['project'] = project_info.iloc[0, 1]
-    else:
-        return False, 'Error: 请把“所属系统/项目”填写在文件头部'
     temp_info['batch'] = '2020Q1'
     # print(temp_info)
     return True, temp_info
 
 
-def get_noncosmic_info():
+# ['batch', 'project', 'requirementNO', 'requirement_name', 'requirement_detail',
+#               'work_cat','work_name', 'work_detail', 'days_spent']
+def get_noncosmic_info(cosmic_related, noncosmic_sheet):
+
     return
+
 
 path = 'E:\\cosmic 评审\\2020年第一季度专家评审打分表.xlsx等文件\\专家评审材料'
 file_count = 0
@@ -108,19 +116,42 @@ for folderName, subfolders, filenames in os.walk(path):
     for filename in filenames:
         # 避免重复读取苹果系统格式的文件
         if '工作量核算' in filename and '__MACOSX' not in folderName:
+            # print(re.split('项目序号|.xls|_|2020', filename))
+            temp_file = re.split('项目序号|\.|_|2020', filename)
             file_path = folderName + '\\' + filename
-            # print(file_path)
+            project_No = -1
+            try:
+                project_No = int(temp_file[1])
+            except Exception as e:
+                print('请检查文件名称是否满足《附件9：工作量核算表（结算）-项目序号xxx.xls》的文件格式')
+                print(file_path)
+                continue
             file_count += 1
+            s4 = pd.DataFrame()
             try:
                 all = pd.read_excel(file_path, sheet_name=None, header=None)
                 s2_key = list(all.keys())[1]
                 s2 = all[s2_key]
 
                 if len(all.keys()) >= 4 and (list(all.keys())[3]).contains('非COSMIC'):
+                    s4_key = list(all.keys())[3]
                     s4 = all[s4_key]
                 else:
-                    print(folderName)
+                    print('请检查文件的非COSMIC工作信息' + folderName + filename)
+            except Exception as e:
+                print(e)
+                print('请检查文件：' + file_path)
+                continues4 = pd.DataFrame()
+            try:
+                all = pd.read_excel(file_path, sheet_name=None, header=None)
+                s2_key = list(all.keys())[1]
+                s2 = all[s2_key]
 
+                if len(all.keys()) >= 4 and (list(all.keys())[3]).contains('非COSMIC'):
+                    s4_key = list(all.keys())[3]
+                    s4 = all[s4_key]
+                else:
+                    print('请检查文件的非COSMIC工作信息' + folderName + filename)
             except Exception as e:
                 print(e)
                 print('请检查文件：' + file_path)
@@ -134,6 +165,9 @@ for folderName, subfolders, filenames in os.walk(path):
                 print('读取cosmic列表出错')
                 print(cosmic_result)
                 print(file_path)
+            if not s4.empty:
+                get_noncosmic_info(cosmic_result, s4)
+
 print('检索到文件' + str(file_count))
 print('成功读取' + str(have_read))
 print(cosmic_info)
