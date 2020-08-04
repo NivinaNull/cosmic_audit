@@ -9,6 +9,7 @@ import os, sys
 import re
 import math
 import datetime
+from collections import Counter
 
 current_year = str(datetime.datetime.now().year)
 current_quarter = str(int((datetime.datetime.now().month - 1) / 3 + 1))
@@ -35,10 +36,13 @@ year_list = [str(i + datetime.datetime.now().year) for i in range(-5, 6)]
 def format1(item):
     # re_no = re.split('年|需求|序号|号|编号|\d季度|季度\d|' + current_year, item)
     if item:
-        item = ''.join(re.split('\d季度|季度\d|' + '|'.join(year_list), item))
-        re_no = re.findall(r"\d+", item)
-        if len(re_no) == 1:
-            return int(re_no[0])
+        # item = ''.join(re.split('\d季度|季度\d|' + '|'.join(year_list), item))
+        item = ''.join(re.split('[1-4]Q|Q[1-4]|[1-4]季度|季度[1-4]', item))
+        re_no = re.findall("\d+", item)
+        if len(re_no) >= 1:
+            re_no = set(re_no) - set(year_list)
+            if len(re_no) == 1:
+                return int(re_no.pop())
     return None
 
 
@@ -50,13 +54,20 @@ def format2(item):
             for n in re_no:
                 if n==item:
                     return None
-                m = re.search('^(需求.*|编号.*|序号.*|)' + n, item)
+                m = re.search('^(.*需求.*?|.*序号.*?|.*编号.*?|)' + n, item)
                 if m:
                     matched = m.group(0)
-                    if ('合计' in matched) or ('个数' in matched):
+                    if ('合计' in matched) or (('共'+ n  in item) or (n + '个' in item) or (n + '需求' in item) and len(item) <= 8):
                         return None
-                    name = re.split(':|：|' + matched, item)
-                    return int(n), ''.join(name)
+                    name = ''
+                    try:
+                        name = re.split(':|：|' + matched, item)
+                    except Exception as e:
+                        return None
+                    name = ''.join(name)
+                    if not name:
+                        return None
+                    return int(n), name
     return None
 
 
@@ -86,10 +97,9 @@ def get_cosmic_info(cosmic_sheet):
         return False, 'ERROR: 请检查《表2 需求开发工作量核算表》需求名称是否存在'
 
     part2 = cosmic_sheet[cosmic_sheet.iloc(axis=1)[0].str.strip() == '需求提出人'].reset_index(drop=True)
-    # print('part2' * 30 + '\n', list(part2.iloc(axis = 1)[2].isnull()))
+    # print('part2' * 30 + '\n', list(part2.columns))
     part2.dropna(inplace=True, axis=1)
     b3 = (part2.iloc[:, 1].str.strip() == '').any()
-    # print('part2' * 30 + '\n', part2)
     if part2.shape[0] == requirement_count and part2.shape[1] == 6 and not b3:
         temp_info['advocator'] = part2.iloc[:, 1]
     else:
@@ -98,13 +108,13 @@ def get_cosmic_info(cosmic_sheet):
                       '2.需求提出人、实际工作量（人天）、需求预估工作量（人天）是否存在漏填'
 
     # 找到'实际工作量（人天）'的列
-    b4 = (part2.iloc[:, 2].str.strip().isin(['实际工作量（人天）'])).all()
+    b4 = (part2.iloc[:, 2].str.strip().map(lambda x:True if '实际工作量' in x else False)).all()
     # 检查'实际工作量（人天）'是否存在空值
     b5 = (part2.iloc[:, 3] == '').any()
     try:
-        part2.iloc(axis=1)[3] = part2.iloc(axis=1)[3].astype(float)
+        part2.iloc(axis=1)[3] = part2.iloc(axis=1)[3].map(lambda x: x.split('人天')[0] if type(x)==str else x).astype(float)
     except Exception as e:
-        return False, 'ERROR: 请检查《表2 需求开发工作量核算表》实际工作量是否为数值'
+        return False, str(e) + 'ERROR: 请检查《表2 需求开发工作量核算表》实际工作量是否为数值'
     if b4 and not b5:
         temp_info['days_spent'] = part2.iloc[:, 3]
     else:
@@ -121,20 +131,27 @@ def get_cosmic_info(cosmic_sheet):
     coding_selection = ['代码', '代码开发', '数据脚本', '数据配置']
     coding_requirement_indices = cosmic_sheet[cosmic_sheet.iloc[:, 0].str.strip().isin(coding_selection)].index
 
+    if len(coding_requirement_indices) != requirement_count:
+        return False, 'ERROR: 《表2 需求开发工作量核算表》中<代码开发>部分必须和需求个数一一对应（必须存在，可以不填）'
     coding_requirement_indices = coding_requirement_indices + 2
     coding_requirement = cosmic_sheet.iloc[coding_requirement_indices, :]
-
-    coding_requirement.iloc[:, 3].fillna('无', inplace=True)
+    # print('coding_requirement' * 10 + '\n', coding_requirement)
+    coding_requirement.iloc[:, 3].fillna('', inplace=True)
     coding_requirement.dropna(axis=1,inplace=True)
     coding_requirement.reset_index(drop=True, inplace=True)
+    # print('coding_requirement' * 10 + '\n', coding_requirement)
 
     # 找到代码的功能点描述
-    if coding_requirement.shape[0] == requirement_count and (coding_requirement.iloc(axis=1)[0].str.contains('功能')).all():
-        temp_info['coding_requirement'] = coding_requirement.iloc[:, 1]
-    else:
-        return False, 'ERROR: 请检查《表2 需求开发工作量核算表》代码开发是否存在，是否满足“投入人员-功能点数量-功能名称列表”的描述格式'
-    # print('1' * 30 + '\n', temp_info)
-    temp_info = temp_info[~(temp_info.coding_requirement == '无')]
+
+    coding_requirement_list = []
+    for i in range(requirement_count):
+        if '功能' in coding_requirement.iloc[i, 0]:
+            coding_requirement_list.append(coding_requirement.iloc[i, 1])
+        else:
+            # coding_requirement.iloc[i, 0] == '无'
+            coding_requirement_list.append('')
+    temp_info.coding_requirement = coding_requirement_list
+    # temp_info = temp_info[~(temp_info.coding_requirement == '')]
     temp_info['batch'] = '2020Q1'  ### current_batch
     # print('2' * 30 + '\n', temp_info)
     return True, temp_info
@@ -157,7 +174,6 @@ def get_noncosmic_info(noncosmic_sheet):
             # 找到文件非cosmic信息的有效开始部分
             if noncosmic_sheet.iloc[0, i] == '需求序号':
                 temp_info['requirementNO'] = noncosmic_sheet.iloc[1:, i].astype(str)
-                # print('1' * 30, temp_info)
                 info_count += 1
             elif noncosmic_sheet.iloc[0, i] == '需求名称':
                 temp_info['requirement_name'] = noncosmic_sheet.iloc[1:, i]
@@ -195,8 +211,10 @@ def get_noncosmic_info(noncosmic_sheet):
         temp_info['requirementNO'] = temp_info['requirementNO'].astype(int)
         temp_info['days_spent'] = temp_info['days_spent'].astype(float)
         # 防止需求序号漏填、错填 导致的需求丢失
+        # print('start' * 20 + '\n')
+        # print(list(temp_info['requirementNO']))
         if len(set(temp_info['requirementNO'].astype(str) + temp_info['requirement_name'])) != len(set(temp_info['requirementNO'])):
-            return False, 'ERROR: 请检查非cosmic信息的需求序号、需求名称是否存在漏填或错填'
+            return False, 'ERROR: 请检查<表4 非COSMIC评估工作量填报表>中的需求序号、需求名称是否存在漏填或错填'
         for requirementNO, part in temp_info.groupby(['requirementNO']):
             if len(set(part['days_spent'].dropna().to_list())) == 1:
                 temp = pd.DataFrame()
@@ -209,7 +227,7 @@ def get_noncosmic_info(noncosmic_sheet):
                 noncosmic_result = noncosmic_result.append(temp, ignore_index=True)
                 noncosmic_result.requirementNO = noncosmic_result.requirementNO.astype(int)
             else:
-                return False, 'ERROR: 请检查<表4 非COSMIC评估工作量填报表>中的 非COSMIC人天 填写是否正确'
+                return False, 'ERROR: 请检查<表4 非COSMIC评估工作量填报表>中的 非COSMIC人天 填写是否正确(同一个需求只能对应一个)'
         return True, noncosmic_result
     else:
         return False, 'ERROR: 无法定位<表4 非COSMIC评估工作量填报表>中的项目序号'
@@ -237,10 +255,10 @@ def get_requirements(sketch):
         project_name = ''.join(project_name_list)
     else:
         project_name = ''.join(project_name_list)
-    print('5' * 30 + '\n', list(temp.values))
+    # print('5' * 30 + '\n', list(temp.values))
     temp = temp.map(format2).dropna()
-    print('6' * 30 + '\n', list(temp.values))
-    print([x[0] for x in temp.values])
+    # print('6' * 30 + '\n', list(temp.values))
+    # print([x[0] for x in temp.values])
     if temp.empty:
         return False, temp, 'ERROR, 请检查<表1 工作量核算表 >中的需求名称是否满足{需求序号XXX：需求名称}的命名方式'
     temp = pd.DataFrame(temp.values, columns=['origin'])
@@ -270,7 +288,7 @@ def read_noncosmic_sheet(all, s4_key):
 
 
 path = 'D:\\Audit\\专家评审材料'
-# path = 'D:\\Audit\\专家评审材料\\101\\2020-1-101-深度分析云\\2020-1-101-深度分析云\\项目序号101：深度分析云项目20年Q1专家评审材料\\项目序号101：深度分析云项目20年Q1专家评审材料'
+# path = 'D:\\Audit\\专家评审材料'
 file_count = 0
 sketch_have_read = 0
 cosmic_have_read = 0
@@ -279,19 +297,28 @@ for folderName, subfolders, filenames in os.walk(path):
     for filename in filenames:
         # 避免重复读取苹果系统格式的文件
         if '工作量核算' in filename and '__MACOSX' not in folderName:
-            file_name_split = re.split('项目序号|\.|_|' + current_year, filename)
+            # file_name_split = re.split('项目序号|\.|_|' + current_year, filename)
             file_path = folderName + '\\' + filename
+            filename = re.sub("[\s+\.\!\/\:_,$%^*(+\"\']+|[+——！，。？、：~@#￥%……&*（）]+", "", filename)
             projectNo = -1
-            try:
-                projectNo = int(file_name_split[1])
-            except Exception as e:
-                print('请检查文件名称是否满足《附件9：工作量核算表（结算）-项目序号xxx.xls》的文件格式\n' + file_path)
+            s = re.search('项目序号\d+', filename)
+            if s:
+                matched = s.group(0)
+                projectNo = re.findall("\d+", matched)
+                if len(projectNo) == 1:
+                    projectNo = projectNo[0]
+                else:
+                    print('ERROR:请检查文件名称是否满足《附件9：工作量核算表（结算）-项目序号xxx.xls》的文件格式\n' + file_path)
+                    continue
+                # print('projectNo' * 20, projectNo, '\n', file_path)
+            else:
+                print('ERROR:请检查文件名称是否满足《附件9：工作量核算表（结算）-项目序号xxx.xls》的文件格式\n' + file_path)
                 continue
             s1_key, s2_key, s4_key = '', '', ''
             try:
                 all = pd.read_excel(file_path, sheet_name=None, header=None)
             except Exception as e:
-                print('读取文件出错——请检查文件：' + file_path)
+                print('ERROR:读取文件出错——请检查文件：' + file_path)
                 continue
 
             if len(list(all.keys())) >= 4 and '非COSMIC' in list(all.keys())[3]:
@@ -312,7 +339,7 @@ for folderName, subfolders, filenames in os.walk(path):
             if FLAG:
                 sketch_have_read += 1
             else:
-                print('requirements_result_fail_to_read'* 20 + '\n', project_name, '\n', file_path)
+                print('requirements_result_fail_to_read'* 5 + '\n', project_name, '\n', requirements_result, '\n', file_path)
                 continue
 
             # sheet2、sheet4部分
@@ -347,28 +374,40 @@ for folderName, subfolders, filenames in os.walk(path):
                 set_union = set(noncosmic_result.requirementNO)
             if set(requirements_result.requirementNO) == set_union:
                 if FLAG1:
+                    if not cosmic_result.empty:
+                        cosmic_requirements_counter = dict(Counter(cosmic_result.requirement_name))
+                        if set(cosmic_requirements_counter.values()) != {1}:
+                            to_be_checked = '、'.join(
+                                [key + '、次数：' + str(value) for key, value in cosmic_requirements_counter.items() if value > 1])
+                            print('WARN:cosmic信息中存在相同需求名称：' + to_be_checked + '\n' + file_path)
+                            continue
+                    # cosmic_result.drop_duplicates(subset=['requirement_name'], inplace=True)
                     cosmic_info = cosmic_info.append(cosmic_result, ignore_index=True)
                     cosmic_have_read += 1
                 if FLAG2:
+                    if not noncosmic_result.empty:
+                        noncosmic_requirements_counter = dict(Counter(noncosmic_result.requirement_name))
+                        if set(noncosmic_requirements_counter.values()) != {1}:
+                            to_be_checked = '、'.join(
+                                [key + str(value) for key, value in noncosmic_requirements_counter.items() if value > 1])
+                            print('Warning:noncosmic信息中存在相同需求名称' + to_be_checked)
+                            continue
                     noncosmic_info = noncosmic_info.append(noncosmic_result, ignore_index=True)
                     noncosmic_have_read += 1
             else:
-            #     sketch_have_read -= 1
-            #     cosmic_have_read -= 1
-            #     noncosmic_have_read -= 1
                 print('ERROR:sheet2与sheet4的需求总集合与sheet1的需求集合不符\n',
                       'sheet2与sheet4的需求总集合：\n', set_union, '\n',
-                      'sheet1需求集合：\n',set(), '\n',
                       'sheet1需求集合：\n',set(requirements_result.requirementNO), '\n',
                       file_path)
                 continue
+
 
 print('检索到文件：' + str(file_count))
 print('成功读取工作量核算汇总表的文件：' + str(sketch_have_read))
 print('成功读取cosmic信息的文件：' + str(cosmic_have_read))
 print('成功读取非cosmic信息的文件' + str(noncosmic_have_read))
-print(noncosmic_info)
 print(cosmic_info)
+print(noncosmic_info)
 
-# noncosmic_info.to_pickle('./data/noncosmic_info.pkl')
-# cosmic_info.to_pickle('./data/cosmic_info.pkl')
+cosmic_info.to_pickle('./data/cosmic_info.pkl')
+noncosmic_info.to_pickle('./data/noncosmic_info.pkl')
