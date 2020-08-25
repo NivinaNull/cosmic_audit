@@ -10,6 +10,7 @@ import re
 import math
 import datetime
 from collections import Counter
+import pickle
 
 current_year = str(datetime.datetime.now().year)
 current_quarter = str(int((datetime.datetime.now().month - 1) / 3 + 1))
@@ -374,24 +375,25 @@ for folderName, subfolders, filenames in os.walk(path):
                 set_union = set(noncosmic_result.requirementNO)
             if set(requirements_result.requirementNO) == set_union:
                 if FLAG1:
-                    if not cosmic_result.empty:
-                        cosmic_requirements_counter = dict(Counter(cosmic_result.requirement_name))
-                        if set(cosmic_requirements_counter.values()) != {1}:
-                            to_be_checked = '、'.join(
-                                [key + '、次数：' + str(value) for key, value in cosmic_requirements_counter.items() if value > 1])
-                            print('WARN:cosmic信息中存在相同需求名称：' + to_be_checked + '\n' + file_path)
-                            continue
-                    # cosmic_result.drop_duplicates(subset=['requirement_name'], inplace=True)
+                    # if not cosmic_result.empty:
+                    #     cosmic_requirements_counter = dict(Counter(cosmic_result.requirement_name))
+                    #     if set(cosmic_requirements_counter.values()) != {1}:
+                    #         to_be_checked = '、'.join(
+                    #             [key + '、次数：' + str(value) for key, value in cosmic_requirements_counter.items() if value > 1])
+                    #         print('WARN:cosmic信息中存在相同需求名称：' + to_be_checked + '\n' + file_path)
+                    #         continue
+                    cosmic_result.drop_duplicates(subset=['requirement_name'], inplace=True)
                     cosmic_info = cosmic_info.append(cosmic_result, ignore_index=True)
                     cosmic_have_read += 1
                 if FLAG2:
-                    if not noncosmic_result.empty:
-                        noncosmic_requirements_counter = dict(Counter(noncosmic_result.requirement_name))
-                        if set(noncosmic_requirements_counter.values()) != {1}:
-                            to_be_checked = '、'.join(
-                                [key + str(value) for key, value in noncosmic_requirements_counter.items() if value > 1])
-                            print('Warning:noncosmic信息中存在相同需求名称' + to_be_checked)
-                            continue
+                    # if not noncosmic_result.empty:
+                    #     noncosmic_requirements_counter = dict(Counter(noncosmic_result.requirement_name))
+                    #     if set(noncosmic_requirements_counter.values()) != {1}:
+                    #         to_be_checked = '、'.join(
+                    #             [key + str(value) for key, value in noncosmic_requirements_counter.items() if value > 1])
+                    #         print('Warning:noncosmic信息中存在相同需求名称' + to_be_checked)
+                    #         continue
+                    noncosmic_result.drop_duplicates(subset=['requirement_name'], inplace=True)
                     noncosmic_info = noncosmic_info.append(noncosmic_result, ignore_index=True)
                     noncosmic_have_read += 1
             else:
@@ -406,8 +408,15 @@ print('检索到文件：' + str(file_count))
 print('成功读取工作量核算汇总表的文件：' + str(sketch_have_read))
 print('成功读取cosmic信息的文件：' + str(cosmic_have_read))
 print('成功读取非cosmic信息的文件' + str(noncosmic_have_read))
-print(cosmic_info)
-print(noncosmic_info)
+print(cosmic_info.shape)
+print(noncosmic_info.shape)
 
-cosmic_info.to_pickle('./data/cosmic_info.pkl')
-noncosmic_info.to_pickle('./data/noncosmic_info.pkl')
+# cosmic_info.to_pickle('./data/cosmic_info.pkl')
+# noncosmic_info.to_pickle('./data/noncosmic_info.pkl')
+
+cosmic_info.to_csv('./data/cosmic_info.csv', encoding="utf_8_sig", index=False)
+noncosmic_info.to_csv('./data/noncosmic_info.csv', encoding="utf_8_sig", index=False)
+# with open('./data/cosmic_info.pkl', mode='a') as fd1:
+#     pickle.dump(cosmic_info, fd1)
+# with open('./data/noncosmic_info.pkl', mode='a') as fd2:
+#     pickle.dump(noncosmic_info, fd2)
