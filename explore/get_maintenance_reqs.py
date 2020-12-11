@@ -5,6 +5,7 @@
 # @File    : get_maintenance_reqs
 from pathlib import Path
 import os
+import math
 import pandas as pd
 
 pd.set_option('display.max_columns',20) #给最大列设置为10列
@@ -34,7 +35,7 @@ class GetMaintenanceReqs:
 
         def to_std(item):
             if len(item) == 8:
-                s = 'Q' + str(int(item[4:6]) % 4 + 1)
+                s = 'Q' + str(math.ceil(int(item[4:6]) / 3))
                 return (item[:4] + s)
             else:
                 return None
@@ -89,7 +90,7 @@ class GetMaintenanceReqs:
         if out_file.is_file():
             print('pickle文件已存在')
             his = pd.read_pickle(out_file)
-            his = his.append(self.result_data)
+            his = his.append(self.result_data, ignore_index=True)
             # his.drop_duplicates(inplace=True)
             his.to_pickle(out_file)
         else:
@@ -99,11 +100,11 @@ class GetMaintenanceReqs:
 if __name__ == '__main__':
 
     source = Path('C:\\ChinaMobile\\maintenance_requirements')
-    target = Path('C:\\ChinaMobile\\maintenance_requirements')
+    target = Path('./data')
     get_reqs = GetMaintenanceReqs(source, target)
     maintenance_reqs = get_reqs.read_files()
     print(maintenance_reqs)
     # 预检查是否存在需求填写重复
     get_reqs.duplicate_check()
     ####### 数据持久化，运行多次会导致将该次读取的数据多次追加，请确认同一批次的需求只持久化一次
-    # get_reqs.persist()
+    get_reqs.persist()
