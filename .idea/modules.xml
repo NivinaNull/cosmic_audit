@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/cosmic_explore.iml" filepath="$PROJECT_DIR$/.idea/cosmic_explore.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/cosmic_audit.iml" filepath="$PROJECT_DIR$/.idea/cosmic_audit.iml" />
     </modules>
   </component>
 </project>

@@ -1,0 +1,104 @@
+import pandas as pd
+import jieba
+import jieba.posseg as pseg
+import datetime
+import re
+import sys
+from pathlib import Path
+
+
+pd.set_option('display.max_columns', 20)   #给最大列设置为20列
+pd.set_option('display.max_rows', 10)   #设置最大可见10行
+jieba.load_userdict("../vector_data/custom_dict.txt")
+
+
+class DataPrep(object):
+
+    def __init__(self, data_folder, output):
+        self.cosmic_info = pd.read_pickle(data_folder / 'cosmic_info.pkl').fillna('')
+        self.noncosmic_info = pd.read_pickle(data_folder / 'noncosmic_info.pkl').fillna('')
+        self.maintenance_info = pd.read_pickle(data_folder / 'maintenance_req.pkl').fillna('')
+        self.output = output
+        # self._get_corpus_data(output)
+
+    def to_corpus_data(self):
+        corpus_list = []
+        stop_property = ['nr', 'o', 'p', 'q', 'r', 'x', 'y', 'w', 'uj', 'm', 'un', 'c']
+
+        stop_words_check = dict.fromkeys(stop_property)
+        stop_words_check['one'] = ['one']
+
+        def num_process(w):
+            if len(w.word) == 1:
+                stop_words_check['one'].append(w.word)
+                return False
+            if w.flag in stop_property:
+                if not stop_words_check[w.flag]:
+                    stop_words_check[w.flag] = [w.flag]
+                else:
+                    stop_words_check[w.flag].append(w.word)
+                return False
+            else:
+                return True
+
+        def segment(row):
+            if row:
+                year_list = [str(i + datetime.datetime.now().year) for i in range(-20, 21)]
+                year_related = ['\d*' + y + '\d*' for y in year_list]
+                year_related_str = '|'.join(year_related)
+                row = re.sub(year_related_str + '|\d\.|\d、|\d,|\d，|\W+', ' ', row).replace('_', ' ')
+                jieba.load_userdict('../data/my_dict.txt')
+                words = pseg.lcut(row)
+                words = [i.word for i in words if num_process(i) and not re.search('R|r[0-9]\d+', i.word)]
+            else:
+                words = []
+            return words
+
+        def to_str(attri_row):
+            joint_info = ''
+            for c in range(len(attri_row.work_detail)):
+                if not (attri_row.work_detail[c].strip() == '无' or attri_row.work_detail[c].strip() == ''):
+                    joint_info = attri_row.work_detail[c]
+                    if not (attri_row.work_name[c].strip() == '无' or attri_row.work_name[c].strip() == ''):
+                        joint_info = joint_info + ' ' + attri_row.work_name[c]
+            return joint_info
+
+        def normalization(df, col_list):
+            normal_cols = ['type', 'batch', 'projectNO', 'requirementNO', 'joint_info']
+            df['joint_info'] = ''
+            for c in col_list:
+                df['joint_info'] = df['joint_info'] + ' ' + df[c].astype(str)
+            df['joint_info'] = df['joint_info'].map(segment)
+            df = df[normal_cols]
+
+        cosmic_inner = self.cosmic_info.copy()
+        noncosmic_inner = self.noncosmic_info.copy()
+        maintenance_inner = self.maintenance_info.copy()
+
+        # cosmic信息、非cosmic信息、运维信息均不能为空
+        if not (cosmic_inner.empty or noncosmic_inner.empty or maintenance_inner.empty):
+            noncosmic_inner['work_name_detail'] = noncosmic_inner[['work_name', 'work_detail']].apply(to_str, axis=1)
+            normalization(cosmic_inner,['project_name', 'requirement_name', 'requirement_detail', 'coding_requirement'])
+            normalization(noncosmic_inner, ['work_name_detail', 'requirement_name', 'project_name'])
+            normalization(maintenance_inner, ['project_name', 'requirement_name', 'requirement_detail', 'phase_detail'])
+
+            ################################################save the stopwords ##########################################
+            for k in stop_words_check.keys():
+                with open(self.output / 'stopwords_folder' / (k + '.txt'), 'wb') as f:
+                    f.write(str(stop_words_check[k]).encode('utf-8'))
+            ##############################################################################################################
+            all = pd.concat([cosmic_inner, noncosmic_inner, maintenance_inner])
+            with open(self.output / 'corpus_regularized.txt', 'w') as cf:
+                all['joint_info'].tolist()
+                cf.write('\n'.join())
+
+        else:
+            print('ERROR: cosmic_info、noncosmic_info、maintenance_info信息均不能为空，请检查')
+            sys.exit()
+
+
+if __name__ == '__main__':
+   in_path = Path('../data')
+   out_path = Path('./data')
+   data_prep_inst = DataPrep(in_path, out_path)
+   data_prep_inst.to_corpus_data()
