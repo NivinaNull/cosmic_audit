@@ -4,17 +4,13 @@
 # @Email   : nivinanull@163.com
 # @File    : similarity_analyse.py
 
-import numpy as np
 import pandas as pd
 import datetime
-import copy
 import sys
 import jieba
 from collections import OrderedDict
 import jieba.posseg as pseg
-import codecs
 import re
-import json
 from gensim import corpora, models
 from docx import Document
 from docx.shared import Pt,RGBColor
@@ -25,68 +21,33 @@ from gensim.similarities import SparseMatrixSimilarity
 
 pd.set_option('display.max_columns',20) #给最大列设置为20列
 pd.set_option('display.max_rows',10)#设置最大可见10行
-LATEST_BATCH = '2020Q3'  ##### 用于计算相似需求的
+
+# ##################################################最新季度信息
+LATEST_BATCH = '2020Q4'  ##### 筛选出新需求
+IF_MTR = 0
 
 
 def get_all_reqs():
-    # cosmic_cols = ['type', 'batch', 'project_name', 'projectNO', 'requirementNO', 'requirement_name', 'requirement_detail', 'advocator',
-    #                                       'days_spent', 'coding_requirement']
-    #
-    # noncosmic_cols = ['type', 'batch', 'project_name', 'projectNO', 'requirementNO', 'requirement_name', 'work_cat', 'work_name',
-    #                                     'work_detail', 'days_spent']
-    # maintenance_req_cols = ['type', 'projectNO', 'project_name', 'batch', 'requirementNO', 'requirement_name',
-    #                   'requirement_detail', 'advocator', 'days_spent', 'phase_detail']
-    raw_cosmic = pd.read_pickle('./data/cosmic_info.pkl').fillna('')  ##########.sample(n=10)
-    # raw_cosmic = raw_cosmic[['project_name', 'requirement_name', 'requirement_detail', 'advocator', 'coding_requirement']].astype(str)
-    raw_noncosmic = pd.read_pickle('./data/noncosmic_info.pkl').fillna('')
+    raw_cosmic = pd.read_pickle('./data/20201218/cosmic_info.pkl').fillna('')  ##########.sample(n=10)
+    # raw_cosmic = raw_cosmic[
+    #     ['project_name', 'requirement_name', 'requirement_detail', 'advocator', 'coding_requirement']].astype(str)
+    raw_noncosmic = pd.read_pickle('./data/20201218/noncosmic_info.pkl').fillna('')
     # raw_noncosmic = raw_noncosmic[['project_name', 'requirement_name', 'work_name', 'work_detail']].astype(str)
-    maintenance_req = pd.read_pickle('./data/maintenance_req.pkl').fillna('')
-    # maintenance_req = maintenance_req[['project_name', 'requirement_name', 'requirement_detail', 'advocator', 'phase_detail']].astype(str)
+    if IF_MTR:
+        maintenance_req = pd.read_pickle('./data/maintenance_req.pkl').fillna('')
+        # maintenance_req = maintenance_req[['project_name', 'requirement_name', 'requirement_detail', 'advocator', 'phase_detail']].astype(str)
+    else:
+        maintenance_req = pd.DataFrame(
+            columns=['type', 'batch', 'projectNO', 'requirementNO', 'file_trail', 'project_name', 'requirement_name', 'requirement_detail', 'advocator', 'phase_detail'])
     return raw_cosmic, raw_noncosmic, maintenance_req
 
 
-def get_new_req(cosmic, noncosmic, maintenance):
-    return cosmic[cosmic['batch'] == LATEST_BATCH], noncosmic[noncosmic['batch'] == LATEST_BATCH], maintenance[maintenance['batch'] == LATEST_BATCH]
-
-# result = get_sim(info[FLAG], new_req_corpus, flag)
-# 已存需求的分词词料，新需求的分词词料，FLAG
-def get_sim(previous_req, new_req):
-    # 利用cosmic和非cosmic信息构建的Dictionary
-    dictionary = corpora.Dictionary.load_from_text('./data/total.dic')
-    corpus = [dictionary.doc2bow(text) for text in previous_req['joint_info']]
-
-    tfidf = models.TfidfModel(corpus)
-    index = SparseMatrixSimilarity(tfidf[corpus], 4000)
-
-    new = [dictionary.doc2bow(t) for t in new_req['joint_info']]
-    sim_dict = {}
-    sim = index[new]
-    relation_exist = []
-    for i in range(new_req.shape[0]):
-        key = (new_req['type'].iloc[i], new_req['batch'].iloc[i], new_req['projectNO'].iloc[i], new_req['requirementNO'].iloc[i])
-        value = {}
-        current = {key,}
-        # print(key)
-        for j in range(len(sim[i])):
-            if sim[i][j] >= 0.77:
-                inner_key = (previous_req['type'].iloc[j], previous_req['batch'].iloc[j], previous_req['projectNO'].iloc[j], previous_req['requirementNO'].iloc[j])
-                if inner_key == key:
-                    continue
-                else:
-                    value[inner_key] = sim[i][j]
-                    current.add(inner_key)
-        if value and (current not in relation_exist):
-            relation_exist.append(current)
-            sim_dict[key] = value
-
-    return sim_dict, len(relation_exist)
-
-
 def get_corpus_data(cosmic_info=pd.DataFrame(), noncosmic_info=pd.DataFrame(), maintenance_info=pd.DataFrame()):
-    # stopwords = [line.decode('utf-8').strip() for line in codecs.open('./data/stopwords.txt', 'rb').readlines()]
+    # 过滤词属性
     stop_property = ['nr', 'o', 'p', 'q', 'r', 'x', 'y', 'w', 'uj', 'm', 'un', 'c']
-
     stop_words_check = dict.fromkeys(stop_property)
+
+    # 过滤长度为一的词
     stop_words_check['one'] = ['one']
 
     def num_process(w):
@@ -108,16 +69,11 @@ def get_corpus_data(cosmic_info=pd.DataFrame(), noncosmic_info=pd.DataFrame(), m
             year_related = ['\d*' + y + '\d*' for y in year_list]
             year_related_str = '|'.join(year_related)
             row = re.sub(year_related_str + '|\d\.|\d、|\d,|\d，|\W+', ' ', row).replace('_', ' ')
-            # row = re.sub('\d\.|\d、|\d|\n|\t', '', row)
             jieba.load_userdict('./data/my_dict.txt')
-            # words = jieba.lcut(row)
-            # words = [i for i in words if i.strip() and num_process(i)]
             words = pseg.lcut(row)
             words = [i.word for i in words if num_process(i) and not re.search('R|r[0-9]\d+', i.word)]
-            # words = [i.word for i in words if lambda i: True if i.flag not in stop_property else False]
         else:
             words = []
-        # return ' '.join(words)
         return words
 
     def to_str(attri_row):
@@ -127,23 +83,21 @@ def get_corpus_data(cosmic_info=pd.DataFrame(), noncosmic_info=pd.DataFrame(), m
                 joint_info = attri_row.work_detail[c]
                 if not (attri_row.work_name[c].strip() == '无' or attri_row.work_name[c].strip() == ''):
                     joint_info = joint_info + ' ' + attri_row.work_name[c]
-                # if not (attri_row.work_cat[c].strip() == '无' or attri_row.work_cat[c].strip() == ''):
-                #     joint_info = joint_info + ' ' + attri_row.work_cat[c] + ' '
         return joint_info
 
     def normalization(df, col_list):
-        normal_cols = ['type', 'batch', 'projectNO', 'requirementNO', 'joint_info']
+        normal_cols = ['type', 'batch', 'projectNO', 'requirementNO', 'file_trail', 'joint_info']
         df['joint_info'] = ''
         for c in col_list:
             df['joint_info'] = df['joint_info'] + ' ' + df[c].astype(str)
         df['joint_info'] = df['joint_info'].map(segment)
         df = df[normal_cols]
-        # return df
 
     cosmic_inner = cosmic_info.copy()
     noncosmic_inner = noncosmic_info.copy()
     maintenance_inner = maintenance_info.copy()
 
+    # ###########################将不空的需求信息，选择相应的列信息构建语料，存储为joint_info列
     if not noncosmic_inner.empty:
         noncosmic_inner['work_name_detail'] = noncosmic_inner[['work_name', 'work_detail']].apply(to_str, axis=1)
         normalization(noncosmic_inner, ['work_name_detail', 'requirement_name', 'project_name'])
@@ -164,10 +118,54 @@ def get_corpus_data(cosmic_info=pd.DataFrame(), noncosmic_info=pd.DataFrame(), m
                 f.write(str(stop_words_check[k]).encode('utf-8'))
         ##############################################################################################################
         return True, pd.concat([cosmic_inner, noncosmic_inner, maintenance_inner])
+    elif not IF_MTR:
+        return True, pd.concat([cosmic_inner, noncosmic_inner])
     else:
         return False, 'ERROR: maintenance_info信息不能为空，请检查'
 
 
+# result = get_sim(info[FLAG], new_req_corpus, flag)
+# 已存需求的分词词料，新需求的分词词料，FLAG
+def get_sim(all_reqs, new_req):
+    # 利用cosmic和非cosmic信息构建的Dictionary
+    dictionary = corpora.Dictionary.load_from_text('./data/total.dic')
+    corpus = [dictionary.doc2bow(text) for text in all_reqs['joint_info']]
+
+    # 得到tfidf模型
+    tfidf = models.TfidfModel(corpus)
+
+    # 得到稀疏矩阵相似度计算模型
+    index = SparseMatrixSimilarity(tfidf[corpus], 4000)
+
+    # 储存相似度结果的双层嵌套词典， 格式为：{new_req_id1:{sim_req_id1:sim_value, ...}, ...}
+    # 其中主键id为需求的type, batch, projectNO, requirementNO, file_trail信息组成的tuple
+    sim_dict = {}
+
+    # 先根据dictionary将new_req（新需求）信息构建words bow，再使用tfidf（TF-IDF模型）将其转化为TF-IDF向量
+    # 将新需求的TF-IDF向量输入到 index（SparseMatrixSimilarity模型）得到相似度矩阵sim， 大小为 [len(new_req) * len(all_req)]
+    sim = index[tfidf[[dictionary.doc2bow(t) for t in new_req['joint_info']]]]
+    print('相似矩阵的大小为：', sim.shape)
+    relation_exist = []
+    for i in range(sim.shape[0]):
+        key = (new_req['type'].iloc[i], new_req['batch'].iloc[i], new_req['projectNO'].iloc[i],
+               new_req['requirementNO'].iloc[i], new_req['file_trail'].iloc[i])
+        # print(key)
+        value = {}
+        for j in range(sim.shape[1]):
+            if sim[i][j] >= 0.86:
+                inner_key = (all_reqs['type'].iloc[j], all_reqs['batch'].iloc[j], all_reqs['projectNO'].iloc[j],
+                             all_reqs['requirementNO'].iloc[j], all_reqs['file_trail'].iloc[j])
+                if inner_key == key:
+                    continue
+                else:
+                    ## current_relation是 关系对set
+                    current_relation = {key, inner_key}
+                    if current_relation not in relation_exist:
+                        value[inner_key] = sim[i][j]
+                        relation_exist.append(current_relation)
+        if value:
+            sim_dict[key] = value
+    return sim_dict, len(relation_exist)
 
 
 def result_persist(result_dict, reqs, related_no):
@@ -182,6 +180,7 @@ def result_persist(result_dict, reqs, related_no):
             ('project_name', '项目名称'),
             ('requirementNO', '需求编号'),
             ('requirement_name', '需求名称'),
+            ('file_trail', '路径名称'),
             ('days_spent', '实际消耗时间'),
             ('advocator', '需求提出人'),
             ('requirement_detail', '需求详细信息'),
@@ -213,7 +212,8 @@ def result_persist(result_dict, reqs, related_no):
         pr2 = p.add_run(mes)
         pr2.font.color.rgb = RGBColor(0xff, 0, 0)
         [req_dict.pop(key) for key in ['type', 'batch', 'projectNO', 'project_name', 'requirementNO', 'requirement_name']]
-        mes = '\n'.join([content for content in req_dict.values() if content not in ['需求提出人', '需求详细信息', '代码开发信息', '工作类别', '工作名称',  '工作详情', '任务完成说明']]) + '\n'
+        mes = '\n'.join([content for content in req_dict.values() if content not in
+                         ['路径名称', '需求提出人', '需求详细信息', '代码开发信息', '工作类别', '工作名称',  '工作详情', '任务完成说明']]) + '\n'
         p.add_run(mes)
         if sim_value:
             p.add_run('相似度为：' + sim_value).font.color.rgb = RGBColor(255, 127, 0)
@@ -233,15 +233,17 @@ def result_persist(result_dict, reqs, related_no):
         pt.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
         for k in result_dict.keys():
             # mes += '发现需求批次：{}\t项目编号：{}\t需求编号：{}'.format(k[0], k[1], str(k[2]))
-            req_detail = reqs[(reqs.type == k[0]) & (reqs.batch == k[1]) & (reqs.projectNO == k[2]) & (reqs.requirementNO == k[3])]
+            req_detail = reqs[
+                (reqs.type == k[0]) & (reqs.batch == k[1]) & (reqs.projectNO == k[2]) & (reqs.requirementNO == k[3]) & (reqs.file_trail == k[4])]
             req_detail_dict = df2dict(req_detail)
             in_paragraph(req_detail_dict, doc)
 
             result_dict[k] = sorted(result_dict[k].items(), key=lambda x: x[1], reverse=True)
             sim_req_detail = []
-            print('result_dict[k] ' * 8 + '\n', result_dict[k])
+            print('key ' * 8 + '\n', k, '\n' + 'result_dict[k] ' * 8 + '\n', result_dict[k])
             for t in result_dict[k]:
-                sim_req = reqs[(reqs.type == t[0][0]) & (reqs.batch == t[0][1]) & (reqs.projectNO == t[0][2]) & (reqs.requirementNO == t[0][3])]
+                sim_req = reqs[(reqs.type == t[0][0]) & (reqs.batch == t[0][1]) & (reqs.projectNO == t[0][2]) & (
+                            reqs.requirementNO == t[0][3]) & (reqs.file_trail == t[0][4])]
                 sim_req = df2dict(sim_req)
                 in_paragraph(sim_req, doc, str(t[1]))
 
@@ -259,43 +261,32 @@ if __name__ == '__main__':
 
     if not IF_SUCCESS:
         print(result)
+        sys.exit()
     all_reqs_in_words = result
-    # info.to_csv('./data/info.csv', encoding="utf_8_sig", index=False)
-    # words_corpora_all = []
-    # for df in info:
-    #     all_reqs_in_words.append(df, ignore_index=True)
-    #     words_corpora_all.extend(df['joint_info'].to_list())
     dictionary = corpora.Dictionary(all_reqs_in_words['joint_info'].to_list())
 
-    ####################Total number of corpus positions (number of processed words)
+    # ####################Total number of corpus positions (number of processed words)即处理的文字总数
     print('dictionary.num_pos ' * 5 + '\n', dictionary.num_pos)
-    dictionary.filter_extremes(no_below=3, no_above=0.5, keep_n=4000)
+    dictionary.filter_extremes(no_below=2, no_above=0.8, keep_n=4000)
 
-    ####################################################check the dictionary###########################
-
-    print('len(dictionary.cfs)' * 5, len(dictionary.cfs))
-
-    # # sum of the number of unique words per documen over the entire corpus
-    # print('dictionary.num_nnz' * 5, dictionary.num_nnz)
-
+    # ####################################################check the dictionary###########################
+    print('dictionary 词典大小 ' * 5, len(dictionary.cfs))
     cfs = dictionary.cfs
     token_fs = {}
     for t, id in dictionary.token2id.items():
         # print(t, id)
         token_fs[t] = cfs[id]
-    token_fs = sorted(token_fs.items(), key=lambda x:x[1], reverse=True)
+    token_fs = sorted(token_fs.items(), key=lambda x: x[1], reverse=True)
     print('token_fs' * 10 + '\n', token_fs)
-
     ####################################################################################################
+
     dictionary.save_as_text('./data/total.dic')
 
     cosmic_sim_analyse = []
     noncosmic_sim_analyse = []
-
-    # latest_cosmic_reqs, latest_noncosmic_reqs, latest_maintenance_reqs = get_new_req(info[1], info[0], info[2])
     latest_reqs_in_words = all_reqs_in_words[all_reqs_in_words['batch'] == LATEST_BATCH]
-    pre_reqs_in_words = all_reqs_in_words[~(all_reqs_in_words['batch'] == LATEST_BATCH)]
-    sim_result, req_related_no = get_sim(pre_reqs_in_words, latest_reqs_in_words)
+    print('check the length of requirements ' * 2 + '\n', all_reqs_in_words.shape, latest_reqs_in_words.shape)
+    sim_result, req_related_no = get_sim(all_reqs_in_words, latest_reqs_in_words)
     # print(sim_result)
     all_for_query = all_for_query.fillna('')
     result_persist(sim_result, all_for_query,  req_related_no)

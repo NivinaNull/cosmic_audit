@@ -41,6 +41,7 @@ class GetMaintenanceReqs:
                 return None
 
         pn = file_path.stem
+        file_name = file_path.name
         one_piece = pd.DataFrame(columns=self.column_list)
         file_df = pd.read_excel(file_path, sheet_name=None)
         file_df = file_df[list(file_df.keys())[0]]
@@ -54,9 +55,12 @@ class GetMaintenanceReqs:
             print('WARNING：未读入文件完整信息', '\n', file_path)
         if not one_piece.empty:
             one_piece['type'] = '运维'
-            one_piece['projectNO'] = None
+            one_piece['projectNO'] = '-1'
             one_piece['project_name'] = pn
+            one_piece['file_trail'] = file_name
+            # 将单位小时转化为工作日（一工作日8小时）
             one_piece['days_spent'] = one_piece['days_spent'].astype(int) / 8
+
             try:
                 one_piece.batch = one_piece.batch.astype(int).astype(str).map(to_std)
             except Exception as e:
